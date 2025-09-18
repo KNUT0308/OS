@@ -87,12 +87,12 @@ double questionSeven(int N){
 int main() {
 
     int i = 0;
-    int N;
+    int N = 100;
     double average_time = 0;
 
     printf("Enter value for N: ");
     scanf("%d", &N);
-    
+
     while(i<100){
         average_time = average_time + questionSeven(N);
         i++;
