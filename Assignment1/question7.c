@@ -87,7 +87,7 @@ double questionSeven(int N){
 int main() {
 
     int i = 0;
-    int N = 100;
+    int N;
     double average_time = 0;
 
     printf("Enter value for N: ");
