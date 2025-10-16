@@ -1,7 +1,10 @@
 # How to run the code:
 
-gcc pthread_sum.c -o pthread_sum
+## Compile
+make
 
-./pthread_sum 4
 
-(the number 4 is the number of threads)
+## Run
+make custom-run make run-custom THREADS=8
+
+(For 8 threads)
