@@ -1,7 +1,9 @@
 # How to run the code:
 
-gcc pthread_sum.c -o pthread_sum
+## Compile
+make
 
-./pthread_sum 4 1000000
+## Run
+make run-custom THREADS=4 ELEMENTS=10000
 
-Change the number of threads or the number of elements inside the array.
+(For 4 elements and an array with 10 000 elements)
