@@ -78,17 +78,20 @@ void* player_thread_func(void* arg) {
         }
         if (found == NULL) {
             // The page is not in the active list, check the inactive list
+            //
             // Set up
             current = inactiveListHead;
             j = 0;
             if (current != NULL && current->page_id == currentID) {
                 // The page is located in the head of the list
                 found = current;
-                // remove head
+                // Remove head
                 inactiveListHead = current->next;
                 if (inactiveListHead == NULL) {
+                    // The list contains only one element
                     inactiveListTail = NULL;
                 }
+                // Decrease the list size and set the reference bit to 1
                 inactiveListSize--;
                 found->reference_bit = 1;
                 found->next = NULL;
@@ -98,17 +101,19 @@ void* player_thread_func(void* arg) {
                     if (current->next->page_id == currentID) {
                         // We found the page. Take it out and set reference bit to 1
                         found = current->next;
-                        // unlink
+                        // Unlink the page
                         current->next = current->next->next;
                         if (current->next == NULL) {
+                            // There is nothing to link, current is last page
                             inactiveListTail = current;
                         }
+                        // Decrease the list size and set reference bit to 1
                         inactiveListSize--;
                         found->reference_bit = 1;
                         found->next = NULL;
                         break;
                     }
-                    // Next page in active list
+                    // Next page in inactive list
                     current = current->next;
                     j++;
                 }
@@ -138,49 +143,42 @@ void* player_thread_func(void* arg) {
         usleep(10);
 
         if (activeListSize > n * 0.7) {
+            // There is more than 70% of the capacity in the active list
             // Drain out the 20% of the most inactive pages in the active list to the inactive list
-            pthread_mutex_lock(&list_lock);
+            pthread_mutex_lock(&list_lock); // Lock other threads
             Node* start = activeListHead;
-            if (start == NULL) {
-                pthread_mutex_unlock(&list_lock);
-            } else {
-                int limit = (int)(0.2 * activeListSize);
-                if (limit <= 0) {
-                    pthread_mutex_unlock(&list_lock);
-                } else {
-                    Node* end = start;
-                    int moved = 1;
-                    while (moved < limit && end->next != NULL) {
-                        end = end->next;
-                        moved++;
-                    }
-
-                    // detach the chunk [start..end] from active list
-                    Node* newActiveHead = end->next;
-                    // append chunk to inactive list
-                    if (inactiveListTail == NULL) {
-                        inactiveListHead = start;
-                        inactiveListTail = end;
-                    } else {
-                        inactiveListTail->next = start;
-                        inactiveListTail = end;
-                    }
-                    // terminate the moved chunk
-                    end->next = NULL;
-
-                    // update active head/tail
-                    activeListHead = newActiveHead;
-                    if (activeListHead == NULL) {
-                        activeListTail = NULL;
-                    }
-
-                    // update sizes
-                    activeListSize -= moved;
-                    inactiveListSize += moved;
-
-                    pthread_mutex_unlock(&list_lock);
-                }
+            int limit = (int)(0.2 * activeListSize);
+            Node* end = start;
+            int moved = 1;
+            while (moved < limit && end->next != NULL) {
+                end = end->next;
+                moved++;
             }
+
+            // detach the chunk [start..end] from active list
+            Node* newActiveHead = end->next;
+            // append chunk to inactive list
+            if (inactiveListTail == NULL) {
+                inactiveListHead = start;
+                inactiveListTail = end;
+            } else {
+                inactiveListTail->next = start;
+                inactiveListTail = end;
+            }
+            // terminate the moved chunk
+            end->next = NULL;
+
+            // update active head/tail
+            activeListHead = newActiveHead;
+            if (activeListHead == NULL) {
+                activeListTail = NULL;
+            }
+
+            // update sizes
+            activeListSize -= moved;
+            inactiveListSize += moved;
+
+            pthread_mutex_unlock(&list_lock);
         }
     }
 
