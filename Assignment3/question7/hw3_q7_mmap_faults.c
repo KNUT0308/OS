@@ -1,4 +1,7 @@
 #include <stdio.h>
+#include <assert.h>
+#include <errno.h>
+#include <string.h>
 #include <unistd.h>
 #include <stdlib.h>
 #include <sys/mman.h>
@@ -22,12 +25,13 @@ int main(int argc, char** argv) {
     // OPTION 1
     
 
-    //flags = MAP_ANONYMOUS | MAP_PRIVATE;
+    flags = MAP_ANONYMOUS | MAP_PRIVATE;
     // OPTION 2
-    flags = MAP_ANONYMOUS | MAP_PRIVATE | MAP_HUGETLB;
+    //flags = MAP_ANONYMOUS | MAP_PRIVATE | MAP_HUGETLB;
     // @Add the start of Timer here
     clock_gettime(CLOCK_MONOTONIC, &start); 
     
+
 
     addr = (char*) mmap(NULL, num_pages* page_size, PROT_WRITE | PROT_READ, flags, -1, 0);
 
@@ -50,6 +54,20 @@ int main(int argc, char** argv) {
     double time_elapsed = (end.tv_nsec - start.tv_nsec) / 1e6;
 
     // @Add printout of elapsed time in cycles
+    // File desciptor
+    FILE* fd = fopen("/proc/cpuinfo", "r");
+    assert(fd != NULL);
+    size_t n = 0;
+    char* row = NULL;
+    // Find the row in CPU info with the freq.
+    while (getline(&row, &n, fd) > 0) {
+        if (strstr(row, "cpu MHz")) {
+            printf("%s\n", row);
+            break;
+        }
+    }
+    free(row);
+    fclose(fd);
     printf("%.9f ms time elapsed\n", time_elapsed);
 
     for (int i = 0; (i < num_pages && i < 16); i++) {
