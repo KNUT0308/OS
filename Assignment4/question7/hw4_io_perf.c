@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <stdlib.h>
+#include <fcntl.h>
 
 typedef struct {
      int offset;
@@ -11,6 +12,8 @@ typedef struct {
 typedef struct {
      request *requests;
      int numRequests;
+     char* source; // What to write
+     int destination; // Where to write, using a file descriptor
 } writer_args; // Nickname "writer_args"
 
 void *reader_thread_func(/* ADD */) { 
@@ -27,13 +30,28 @@ void *writer_thread_func(void *arg) {
      // @Add code for writer threads
      // @Given a list of [offset1, bytes1], [offset2, bytes2], ...
      // @for each: write bytes_i to offset_i
-
      writer_args *input = (writer_args *)arg;
-     int *requests = input->requests;
+     request* requests = input->requests;
      int numRequests = input->numRequests;
+     char* buffer = input->source;
+     int fileDescriptor = input->destination;
 
-     // TODO
+     int offset = 0;
+     int bytes = 0;
+     int written = 0;
+     int write = 0;
+     for (int i = 0; i < numRequests; i++) {
+          offset = requests[i].offset;
+          bytes = requests[i].bytes;
+          char *source = buffer + offset;
 
+          while(written < bytes) { // Loop until all bytes written
+               write = pwrite(fileDescriptor, source + written, bytes - written, offset + written);
+               if (write < 0) {printf("ERROR: write failed"); pthread_exit(NULL);}
+               written += write;
+          }
+          written = 0;
+     }     
      pthread_exit(0);
 }
 
@@ -44,19 +62,15 @@ int main(int argc, char *argv[])
      int p = atoi(argv[2]);
 
      // @create a file for saving the data
-     FILE* file;
-     file = fopen("file.txt", "w"); // Open a file in write-mode
+     int fileDescriptor = open("file.txt", O_WRONLY | O_CREAT);
+     if (fileDescriptor < 0) {printf("ERROR: file.txt not handled correctly"); return 1;}
 
      // @allocate a buffer and initialize it
      char* buffer = malloc(n); // Dynamically allocate N bytes in memory of type char, to be used as temporary storage space
      
      FILE* independence;
      independence = fopen("congress-07-04-1776.txt", "r"); // Open the Declaration of Independence in read-mode
-     
-     if (file == NULL || independence == NULL) {
-          printf("ERROR: File not handled correctly");
-          return 1;
-     }
+     if (independence == NULL) { printf("ERROR: congress-07-04-1776.txt not handled correctly"); return 1;}
      
      char character = fgetc(independence);
      for (int i = 0; i < n; i++) {
@@ -109,15 +123,17 @@ int main(int argc, char *argv[])
           random[i].offset = index[i] * 4096;
           random[i].bytes = 128;
      }
+
      free(index);
 
      // @start timing 
-
-     // TODO (above)
+     struct timespec start, end;
+     double timeSequential = 0;
+     clock_gettime(CLOCK_MONOTONIC, &start);
 
      /* Create writer workers and pass in their portion of list1 */   
-     pthread_t *workers = malloc(p * sizeof(pthread_t)); // allocate space for thread IDs
-     writer_args *args = malloc(p * sizeof(writer_args));
+     pthread_t *workers = malloc(p * sizeof(pthread_t)); // space for thread IDs
+     writer_args *args = malloc(p * sizeof(writer_args)); // space for thread arguments
      int handled = 0;
      int piece = 100/p; // Optimization proposal: Give the first threads a bit more to do since they start earlier, instead of giving the last thread more than the others
      for (int i = 0; i < p; i++) {
@@ -126,6 +142,8 @@ int main(int argc, char *argv[])
           }
           args[i].requests = &sequential[handled];
           args[i].numRequests = piece;
+          args[i].source = buffer;
+          args[i].destination = fileDescriptor;
           pthread_create(&workers[i], NULL, writer_thread_func, &args[i]);
           handled += piece;          
      }
@@ -140,10 +158,11 @@ int main(int argc, char *argv[])
      free(buffer);
 
      // @close the file 
-     fclose(file);
+     close(fileDescriptor);
 
      // @end timing 
-
+     clock_gettime(CLOCK_MONOTONIC, &end);
+     timeSequential = (end.tv_nsec - start.tv_nsec) / 1e6;
 
      //@Print out the write bandwidth
      //printf("Write %f MB, use %d threads, elapsed time %f s, write bandwidth: %f MB/s \n", /**/);
