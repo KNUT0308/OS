@@ -5,8 +5,7 @@
 #include <fcntl.h>
 #include <stdatomic.h>
 
-unsigned int bytesWritten;
-unsigned int bytesRead;
+unsigned int bytesCount;
 pthread_mutex_t byteCounterMutex = PTHREAD_MUTEX_INITIALIZER;
 
 typedef struct {
@@ -56,7 +55,7 @@ void *reader_thread_func(void *arg) {
                }               
           }
           pthread_mutex_lock(&byteCounterMutex);
-          bytesRead += readTot;
+          bytesCount += readTot;
           pthread_mutex_unlock(&byteCounterMutex);
      }     
      pthread_exit(0);
@@ -91,7 +90,7 @@ void *writer_thread_func(void *arg) {
                }  
           }
           pthread_mutex_lock(&byteCounterMutex);
-          bytesWritten += writeTot;
+          bytesCount += writeTot;
           pthread_mutex_unlock(&byteCounterMutex);
      }     
      pthread_exit(0);
@@ -115,7 +114,7 @@ int main(int argc, char *argv[])
      if (independence == NULL) { printf("ERROR: congress-07-04-1776.txt not handled correctly"); return 1;}
      
      for (int i = 0; i < n; i++) {
-          int character = fgetc(independence); // TODO: handle as "char" instead of "int" worked previously. Try if this gives error.
+          int character = fgetc(independence);
           if (character != EOF) {
                buffer[i] = (char)character; // Write n bytes (characters) of the Declaration of Independence to the buffer
           } else {
@@ -174,103 +173,109 @@ int main(int argc, char *argv[])
 
      // ****************** Write/read with List 1 (sequential) ******************
 
+     /* Abbreviation explanations:
+     - SW = Sequential write
+     - SR = Sequential read
+     - RW = Random write
+     - RR = Random read
+     */
 
      // @start timing 
-     bytesWritten = 0; // Ensure that our count of written bytes is 0 from the beginning
-     struct timespec startSeq1, endSeq1;
-     clock_gettime(CLOCK_MONOTONIC, &startSeq1);
+     bytesCount = 0; // Ensure that count of written bytes begins at 0
+     struct timespec start_SW, end_SW;
+     clock_gettime(CLOCK_MONOTONIC, &start_SW);
 
      /* Create writer workers and pass in their portion of list1 */   
-     pthread_t *writer_workers = malloc(p * sizeof(pthread_t)); // Space for thread IDs
-     writer_args *argsW = malloc(p * sizeof(writer_args)); // Space for thread arguments
+     pthread_t *workers_SW = malloc(p * sizeof(pthread_t)); // Space for thread IDs
+     writer_args *args_SW = malloc(p * sizeof(writer_args)); // Space for thread arguments
      int handled = 0; // Number of requests handled
      int piece = numSeq/p; // Optimization proposal: Give the first threads a bit more to do since they start earlier, instead of giving the last thread more than the others
      for (int i = 0; i < p; i++) {
           if (i == p-1 && handled < numSeq) { 
                piece = numSeq-handled; // Case when last thread and there is more left, then give the last thread all the remaining requests
           }
-          argsW[i].requests = &sequential[handled];
-          argsW[i].numRequests = piece;
-          argsW[i].source = buffer;
-          argsW[i].destination = fileDescriptor;
-          pthread_create(&writer_workers[i], NULL, writer_thread_func, &argsW[i]);
+          args_SW[i].requests = &sequential[handled];
+          args_SW[i].numRequests = piece;
+          args_SW[i].source = buffer;
+          args_SW[i].destination = fileDescriptor;
+          pthread_create(&workers_SW[i], NULL, writer_thread_func, &args_SW[i]);
           handled += piece;          
      }
      
      /* Wait for all writers to finish */ 
      for (int i = 0; i < p; i++) {
-          pthread_join(writer_workers[i], NULL); // Make sure that each thread terminates before continuing
+          pthread_join(workers_SW[i], NULL); // Make sure that each thread terminates before continuing
      }
      
-     free(writer_workers);
-     free(argsW);
-     free(buffer);
+     free(workers_SW);
+     free(args_SW);
 
      // @close the file 
      close(fileDescriptor);
 
      // @end timing 
-     bytesRead = 0; // Ensure that our count of read bytes is 0 from the beginning
-     clock_gettime(CLOCK_MONOTONIC, &endSeq1);
-     double timeSeq1 = endSeq1.tv_sec - startSeq1.tv_sec + ((endSeq1.tv_nsec - startSeq1.tv_nsec) / 1e9); // Fetch amount of nanoseconds and convert to seconds
-     if (timeSeq1 <= 0) {
+     clock_gettime(CLOCK_MONOTONIC, &end_SW);
+     double time_SW = end_SW.tv_sec - start_SW.tv_sec + ((end_SW.tv_nsec - start_SW.tv_nsec) / 1e9);
+     if (time_SW <= 0) {
           printf("ERROR: Zero or negative time");
           return 1;
      }
 
      //@Print out the write bandwidth
-     double mb = (double)bytesWritten/1000000;
-     printf("Write %f MB, use %d threads, elapsed time %f s, write bandwidth: %f MB/s \n", mb, p, timeSeq1, mb/timeSeq1);
+     double mb = (double)bytesCount/1000000;
+     printf("Write %f MB, use %d threads, elapsed time %f s, write bandwidth: %f MB/s \n", mb, p, time_SW, mb/time_SW);
      
      // @reopen the file 
-     fileDescriptor = open("fileSeq.txt", O_RDONLY); // TODO: add ", 0644"?
+     fileDescriptor = open("fileSeq.txt", O_RDONLY);
      if (fileDescriptor < 0) {printf("ERROR: fileSeq.txt not opened for reading correctly"); return 1;}
 
      // @start timing 
-     struct timespec startSeq2, endSeq2;
-     clock_gettime(CLOCK_MONOTONIC, &startSeq2);
+     bytesCount = 0; // Ensure that count of read bytes begins at 0
+     struct timespec start_SR, end_SR;
+     clock_gettime(CLOCK_MONOTONIC, &start_SR);
 
      /* Create reader workers and pass in their portion of list1 */   
-     pthread_t *reader_workers = malloc(p * sizeof(pthread_t)); // Space for thread IDs
-     reader_args *argsR = malloc(p * sizeof(reader_args)); // Space for thread arguments
-     char* result = malloc(n); // Place to store what all the threads have read
+     pthread_t *workers_SR = malloc(p * sizeof(pthread_t)); // Space for thread IDs
+     reader_args *args_SR = malloc(p * sizeof(reader_args)); // Space for thread arguments
+     char* result_SR = malloc(n); // Place to store what all the threads have read
      handled = 0; // Number of requests handled
      piece = numSeq/p; // Optimization proposal: Give the first threads a bit more to do since they start earlier, instead of giving the last thread more than the others
      for (int i = 0; i < p; i++) {
           if (i == p-1 && handled < numSeq) { 
                piece = numSeq-handled; // Case when last thread and there is more left, then give the last thread all the remaining requests
           }
-          argsR[i].requests = &sequential[handled];
-          argsR[i].numRequests = piece;
-          argsR[i].result = result;
-          argsR[i].source = fileDescriptor;
-          pthread_create(&reader_workers[i], NULL, reader_thread_func, &argsR[i]);
+          args_SR[i].requests = &sequential[handled];
+          args_SR[i].numRequests = piece;
+          args_SR[i].result = result_SR;
+          args_SR[i].source = fileDescriptor;
+          pthread_create(&workers_SR[i], NULL, reader_thread_func, &args_SR[i]);
           handled += piece;          
      }
      
      /* Wait for all reader to finish */ 
      for (int i = 0; i < p; i++) {
-          pthread_join(reader_workers[i], NULL); // Make sure that each thread terminates before continuing
+          pthread_join(workers_SR[i], NULL); // Make sure that each thread terminates before continuing
      }
 
-     free(reader_workers);
-     free(argsR);
-     free(result);
+     free(workers_SR);
+     free(args_SR);
+     free(result_SR);
 
      // @close the file 
      close(fileDescriptor);
 
      // @end timing 
-     clock_gettime(CLOCK_MONOTONIC, &endSeq2);
-     double timeSeq2 = endSeq2.tv_sec - startSeq2.tv_sec + ((endSeq2.tv_nsec - startSeq2.tv_nsec) / 1e9); // Fetch amount of nanoseconds and convert to seconds
-     if (timeSeq2 <= 0) {
+     clock_gettime(CLOCK_MONOTONIC, &end_SR);
+     double time_SR = end_SR.tv_sec - start_SR.tv_sec + ((end_SR.tv_nsec - start_SR.tv_nsec) / 1e9);
+     if (time_SR <= 0) {
           printf("ERROR: Zero or negative time");
           return 1;
      }
 
      //@Print out the read bandwidth
-     mb = (double)bytesRead/1000000;
-     printf("Read %f MB, use %d threads, elapsed time %f s, read bandwidth: %f MB/s \n", mb, p, timeSeq2, mb/timeSeq2);
+     mb = (double)bytesCount/1000000;
+     printf("Read %f MB, use %d threads, elapsed time %f s, read bandwidth: %f MB/s \n", mb, p, time_SR, mb/time_SR);
+
 
 
      // ****************** Write/read with List 2 (random) ******************
@@ -278,9 +283,108 @@ int main(int argc, char *argv[])
 
      // @Repeat the write and read test now using List2 
 
+     // @create a file for saving the data
+     fileDescriptor = open("fileRand.txt", O_WRONLY | O_CREAT | O_TRUNC, 0644);
+     if (fileDescriptor < 0) {printf("ERROR: fileRand.txt not opened for writing correctly"); return 1;}
 
-     /*free up resources properly */
+     // @start timing 
+     bytesCount = 0; // Ensure that count of written bytes begins at 0
+     struct timespec start_RW, end_RW;
+     clock_gettime(CLOCK_MONOTONIC, &start_RW);
+
+     /* Create writer workers and pass in their portion of list1 */   
+     pthread_t *workers_RW = malloc(p * sizeof(pthread_t)); // Space for thread IDs
+     writer_args *args_RW = malloc(p * sizeof(writer_args)); // Space for thread arguments
+     handled = 0; // Number of requests handled
+     piece = numRand/p; // Optimization proposal: Give the first threads a bit more to do since they start earlier, instead of giving the last thread more than the others
+     for (int i = 0; i < p; i++) {
+          if (i == p-1 && handled < numRand) { 
+               piece = numRand-handled; // Case when last thread and there is more left, then give the last thread all the remaining requests
+          }
+          args_RW[i].requests = &random[handled];
+          args_RW[i].numRequests = piece;
+          args_RW[i].source = buffer;
+          args_RW[i].destination = fileDescriptor;
+          pthread_create(&workers_RW[i], NULL, writer_thread_func, &args_RW[i]);
+          handled += piece;          
+     }
      
+     /* Wait for all writers to finish */ 
+     for (int i = 0; i < p; i++) {
+          pthread_join(workers_RW[i], NULL); // Make sure that each thread terminates before continuing
+     }
+     
+     free(workers_RW);
+     free(args_RW);
+
+     // @close the file 
+     close(fileDescriptor);
+
+     // @end timing 
+     clock_gettime(CLOCK_MONOTONIC, &end_RW);
+     double time_RW = end_RW.tv_sec - start_RW.tv_sec + ((end_RW.tv_nsec - start_RW.tv_nsec) / 1e9);
+     if (time_RW <= 0) {
+          printf("ERROR: Zero or negative time");
+          return 1;
+     }
+
+     //@Print out the write bandwidth
+     mb = (double)bytesCount/1000000;
+     printf("Write %f MB, use %d threads, elapsed time %f s, write bandwidth: %f MB/s \n", mb, p, time_RW, mb/time_RW);
+     
+     // @reopen the file 
+     fileDescriptor = open("fileRand.txt", O_RDONLY);
+     if (fileDescriptor < 0) {printf("ERROR: fileRand.txt not opened for reading correctly"); return 1;}
+
+     // @start timing
+     bytesCount = 0; // Ensure that count of read bytes begins at 0 
+     struct timespec start_RR, end_RR;
+     clock_gettime(CLOCK_MONOTONIC, &start_RR);
+
+     /* Create reader workers and pass in their portion of list1 */   
+     pthread_t *workers_RR = malloc(p * sizeof(pthread_t)); // Space for thread IDs
+     reader_args *args_RR = malloc(p * sizeof(reader_args)); // Space for thread arguments
+     char* result_RR = malloc(n); // Place to store what all the threads have read
+     handled = 0; // Number of requests handled
+     piece = numRand/p; // Optimization proposal: Give the first threads a bit more to do since they start earlier, instead of giving the last thread more than the others
+     for (int i = 0; i < p; i++) {
+          if (i == p-1 && handled < numRand) { 
+               piece = numRand-handled; // Case when last thread and there is more left, then give the last thread all the remaining requests
+          }
+          args_RR[i].requests = &random[handled];
+          args_RR[i].numRequests = piece;
+          args_RR[i].result = result_RR;
+          args_RR[i].source = fileDescriptor;
+          pthread_create(&workers_RR[i], NULL, reader_thread_func, &args_RR[i]);
+          handled += piece;          
+     }
+     
+     /* Wait for all reader to finish */ 
+     for (int i = 0; i < p; i++) {
+          pthread_join(workers_RR[i], NULL); // Make sure that each thread terminates before continuing
+     }
+
+     free(workers_RR);
+     free(args_RR);
+     free(result_RR);
+
+     // @close the file 
+     close(fileDescriptor);
+
+     // @end timing 
+     clock_gettime(CLOCK_MONOTONIC, &end_RR);
+     double time_RR = end_RR.tv_sec - start_RR.tv_sec + ((end_RR.tv_nsec - start_RR.tv_nsec) / 1e9);
+     if (time_RR <= 0) {
+          printf("ERROR: Zero or negative time");
+          return 1;
+     }
+
+     //@Print out the read bandwidth
+     mb = (double)bytesCount/1000000;
+     printf("Read %f MB, use %d threads, elapsed time %f s, read bandwidth: %f MB/s \n", mb, p, time_RR, mb/time_RR);
+
+     /* free up resources properly */
+     free(buffer);
 
      return 0;
 }
